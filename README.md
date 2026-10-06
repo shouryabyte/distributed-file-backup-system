@@ -260,3 +260,8 @@ Observe k6 throughput, latency, and error rate alongside Prometheus resource met
 - A sudden process crash between storage write and metadata commit can leave an orphan physical chunk. A periodic orphan scanner would close this gap.
 
 Future work: consistent hashing, S3 backend, Kubernetes, multi-region replication, encryption, erasure coding, versioning, garbage-collection optimization, load balancing, rebalancing, tracing, and autoscaling.
+<<<<<<< HEAD
+=======
+
+
+>>>>>>> 3911792a20d90befce2d10c7111b90bd8f90ad69
