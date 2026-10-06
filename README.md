@@ -80,14 +80,52 @@ erDiagram
   chunks ||--o{ chunk_replicas : stored_as
   storage_nodes ||--o{ chunk_replicas : hosts
   upload_sessions ||--o{ upload_chunks : stages
-  users { uuid id PK; text email UK; text password_hash }
-  files { uuid id PK; uuid user_id FK; text file_name; bigint file_size; integer total_chunks; text status }
-  chunks { uuid id PK; char64 hash UK; integer size; bigint reference_count }
-  file_chunks { uuid file_id FK; uuid chunk_id FK; integer sequence_number }
-  storage_nodes { text id PK; text url; boolean enabled; boolean healthy }
-  chunk_replicas { uuid chunk_id FK; text node_id FK; text status }
-  upload_sessions { uuid id PK; uuid user_id FK; text status; uuid file_id FK }
-  upload_chunks { uuid upload_id FK; integer sequence_number; char64 chunk_hash FK }
+  users {
+    uuid id PK
+    text email UK
+    text password_hash
+  }
+  files {
+    uuid id PK
+    uuid user_id FK
+    text file_name
+    bigint file_size
+    integer total_chunks
+    text status
+  }
+  chunks {
+    uuid id PK
+    char64 hash UK
+    integer size
+    bigint reference_count
+  }
+  file_chunks {
+    uuid file_id FK
+    uuid chunk_id FK
+    integer sequence_number
+  }
+  storage_nodes {
+    text id PK
+    text url
+    boolean enabled
+    boolean healthy
+  }
+  chunk_replicas {
+    uuid chunk_id FK
+    text node_id FK
+    text status
+  }
+  upload_sessions {
+    uuid id PK
+    uuid user_id FK
+    text status
+    uuid file_id FK
+  }
+  upload_chunks {
+    uuid upload_id FK
+    integer sequence_number
+    char64 chunk_hash FK
+  }
 ```
 
 Migrations live in `migrations/` and are applied by the one-shot `migrate` container under a PostgreSQL advisory lock. `outbox` holds pending Kafka events. PostgreSQL stores no file bytes. Redis caches file metadata with TTL 600 seconds by default; cache failures fall back to PostgreSQL. Cache keys include the user ID to preserve ownership boundaries.
@@ -222,7 +260,3 @@ Observe k6 throughput, latency, and error rate alongside Prometheus resource met
 - A sudden process crash between storage write and metadata commit can leave an orphan physical chunk. A periodic orphan scanner would close this gap.
 
 Future work: consistent hashing, S3 backend, Kubernetes, multi-region replication, encryption, erasure coding, versioning, garbage-collection optimization, load balancing, rebalancing, tracing, and autoscaling.
-
-## 60-second interview explanation
-
-“I built a backup API that streams files into 5 MiB SHA-256 chunks. PostgreSQL tracks users, files, chunk order, references, and replica locations; the bytes live on separate storage nodes. A transaction lock and unique hash constraint let concurrent uploads share a physical chunk safely. The API writes one primary and commits an outbox event; Kafka workers build two more copies, verify integrity, and clean unreferenced chunks. Downloads reconstruct the original order and try another healthy replica on failure. Redis caches metadata but PostgreSQL remains authoritative. I use a fourth spare node so the system can restore three replicas after one node fails. The Compose stack includes monitoring and a real end-to-end failure test.”
