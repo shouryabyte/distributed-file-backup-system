@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 10s
+scrape_configs:
+  - job_name: api
+    static_configs: [{ targets: ['api:3000'] }]
+  - job_name: replication-worker
+    static_configs: [{ targets: ['replication-worker:9090'] }]
+  - job_name: integrity-worker
+    static_configs: [{ targets: ['integrity-worker:9090'] }]
+  - job_name: cleanup-worker
+    static_configs: [{ targets: ['cleanup-worker:9090'] }]

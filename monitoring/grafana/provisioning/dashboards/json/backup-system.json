@@ -1,0 +1,78 @@
+{
+  "title": "Distributed Backup System",
+  "uid": "backup-system",
+  "schemaVersion": 41,
+  "version": 1,
+  "refresh": "10s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "API request rate",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [{ "expr": "sum(rate(http_requests_total[5m]))", "legendFormat": "requests/s" }]
+    },
+    {
+      "id": 2,
+      "title": "API p95 latency",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95 seconds"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Deduplication ratio",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 8, "w": 6, "h": 7 },
+      "targets": [{ "expr": "deduplication_ratio" }]
+    },
+    {
+      "id": 4,
+      "title": "Storage node health",
+      "type": "timeseries",
+      "gridPos": { "x": 6, "y": 8, "w": 9, "h": 7 },
+      "targets": [{ "expr": "storage_node_health", "legendFormat": "{{node_id}}" }]
+    },
+    {
+      "id": 5,
+      "title": "Worker retries and failures",
+      "type": "timeseries",
+      "gridPos": { "x": 15, "y": 8, "w": 9, "h": 7 },
+      "targets": [
+        {
+          "expr": "sum by (worker) (rate(worker_retry_total[5m]))",
+          "legendFormat": "{{worker}} retries"
+        },
+        {
+          "expr": "sum by (worker) (rate(worker_failure_total[5m]))",
+          "legendFormat": "{{worker}} failures"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Replication success and failure",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 15, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "sum(rate(replication_success_total[5m]))", "legendFormat": "success/s" },
+        { "expr": "sum(rate(replication_failure_total[5m]))", "legendFormat": "failure/s" }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Uploads and downloads",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 15, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "sum(rate(upload_requests_total[5m]))", "legendFormat": "uploads/s" },
+        { "expr": "sum(rate(download_requests_total[5m]))", "legendFormat": "downloads/s" }
+      ]
+    }
+  ]
+}

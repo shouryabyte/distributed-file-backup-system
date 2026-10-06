@@ -1,0 +1,176 @@
+x-app-env: &app-env
+  DATABASE_URL: postgres://backup:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/backup
+  REDIS_URL: redis://redis:6379
+  KAFKA_BROKERS: kafka:9092
+  JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+  INTERNAL_TOKEN: ${INTERNAL_TOKEN:?Set INTERNAL_TOKEN in .env}
+  CHUNK_SIZE_BYTES: ${CHUNK_SIZE_BYTES:-5242880}
+  MAX_FILE_SIZE_BYTES: ${MAX_FILE_SIZE_BYTES:-1073741824}
+  REPLICATION_FACTOR: ${REPLICATION_FACTOR:-3}
+  CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-600}
+  API_RATE_LIMIT_PER_MINUTE: ${API_RATE_LIMIT_PER_MINUTE:-1000}
+  WORKER_MAX_RETRIES: ${WORKER_MAX_RETRIES:-3}
+  STORAGE_NODES: node-1:http://storage-node-1:3100,node-2:http://storage-node-2:3100,node-3:http://storage-node-3:3100,node-4:http://storage-node-4:3100
+
+x-app-base: &app-base
+  build: .
+  environment: *app-env
+  restart: unless-stopped
+  depends_on:
+    migrate: { condition: service_completed_successfully }
+    kafka: { condition: service_healthy }
+    redis: { condition: service_healthy }
+    storage-node-1: { condition: service_healthy }
+    storage-node-2: { condition: service_healthy }
+    storage-node-3: { condition: service_healthy }
+    storage-node-4: { condition: service_healthy }
+
+x-storage-base: &storage-base
+  build: .
+  command: ['node', 'dist/storage/server.js']
+  environment:
+    PORT: 3100
+    DATA_DIR: /data
+    INTERNAL_TOKEN: ${INTERNAL_TOKEN:?Set INTERNAL_TOKEN in .env}
+    CHUNK_SIZE_BYTES: ${CHUNK_SIZE_BYTES:-5242880}
+  restart: unless-stopped
+  healthcheck:
+    test:
+      [
+        'CMD',
+        'node',
+        '-e',
+        "fetch('http://localhost:3100/internal/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+      ]
+    interval: 5s
+    timeout: 3s
+    retries: 20
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: backup
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: backup
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    ports: ['5432:5432']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U backup -d backup']
+      interval: 5s
+      retries: 20
+  redis:
+    image: redis:7
+    volumes: [redis-data:/data]
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      retries: 20
+  kafka:
+    image: apache/kafka:4.1.0
+    ports: ['9092:9094']
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,HOST://:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      CLUSTER_ID: 4L6g3nShT-eMCtK--X86sw
+    volumes: [kafka-data:/var/lib/kafka/data]
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          '/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1',
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+  migrate:
+    build: .
+    command: ['node', 'dist/migrate.js']
+    environment: *app-env
+    depends_on:
+      postgres: { condition: service_healthy }
+  storage-node-1:
+    <<: *storage-base
+    volumes: [node-1-data:/data]
+  storage-node-2:
+    <<: *storage-base
+    volumes: [node-2-data:/data]
+  storage-node-3:
+    <<: *storage-base
+    volumes: [node-3-data:/data]
+  storage-node-4:
+    <<: *storage-base
+    volumes: [node-4-data:/data]
+  api:
+    <<: *app-base
+    ports: ['3000:3000']
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      retries: 20
+  replication-worker:
+    <<: *app-base
+    command: ['node', 'dist/workers/main.js']
+    depends_on:
+      api: { condition: service_healthy }
+    environment:
+      <<: *app-env
+      WORKER_KIND: replication
+  integrity-worker:
+    <<: *app-base
+    command: ['node', 'dist/workers/main.js']
+    depends_on:
+      api: { condition: service_healthy }
+    environment:
+      <<: *app-env
+      WORKER_KIND: integrity
+  cleanup-worker:
+    <<: *app-base
+    command: ['node', 'dist/workers/main.js']
+    depends_on:
+      api: { condition: service_healthy }
+    environment:
+      <<: *app-env
+      WORKER_KIND: cleanup
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    volumes:
+      [./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro, prometheus-data:/prometheus]
+    ports: ['9090:9090']
+  grafana:
+    image: grafana/grafana:12.2.0
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?Set GRAFANA_PASSWORD in .env}
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports: ['3001:3000']
+    depends_on: [prometheus]
+
+volumes:
+  postgres-data:
+  redis-data:
+  kafka-data:
+  node-1-data:
+  node-2-data:
+  node-3-data:
+  node-4-data:
+  prometheus-data:
+  grafana-data:
