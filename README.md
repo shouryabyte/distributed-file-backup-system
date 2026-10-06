@@ -223,6 +223,4 @@ Observe k6 throughput, latency, and error rate alongside Prometheus resource met
 
 Future work: consistent hashing, S3 backend, Kubernetes, multi-region replication, encryption, erasure coding, versioning, garbage-collection optimization, load balancing, rebalancing, tracing, and autoscaling.
 
-## 60-second interview explanation
 
-“I built a backup API that streams files into 5 MiB SHA-256 chunks. PostgreSQL tracks users, files, chunk order, references, and replica locations; the bytes live on separate storage nodes. A transaction lock and unique hash constraint let concurrent uploads share a physical chunk safely. The API writes one primary and commits an outbox event; Kafka workers build two more copies, verify integrity, and clean unreferenced chunks. Downloads reconstruct the original order and try another healthy replica on failure. Redis caches metadata but PostgreSQL remains authoritative. I use a fourth spare node so the system can restore three replicas after one node fails. The Compose stack includes monitoring and a real end-to-end failure test.”
