@@ -1,5 +1,5 @@
 import { Readable } from 'node:stream';
-import { pool } from '../config/db.js';
+import { withTransaction } from '../config/db.js';
 import { sha256 } from '../chunking/chunks.js';
 import { AppError } from '../errors/AppError.js';
 import {
@@ -63,9 +63,7 @@ export async function download(
 }
 
 export async function removeFile(id: string, userId: string): Promise<void> {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
+  await withTransaction(async (client) => {
     const file = (
       await client.query('SELECT id FROM files WHERE id=$1 AND user_id=$2 FOR UPDATE', [id, userId])
     ).rows[0];
@@ -91,35 +89,21 @@ export async function removeFile(id: string, userId: string): Promise<void> {
           chunkHash: chunk.hash.trim(),
         });
     }
-    await client.query('COMMIT');
-    await invalidate(`file:${userId}:${id}`);
-    await invalidate(`file-chunks:${id}`);
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
+  await invalidate(`file:${userId}:${id}`);
+  await invalidate(`file-chunks:${id}`);
 }
 
 export async function verifyFile(id: string, userId: string): Promise<{ queued: number }> {
   await fileDetails(id, userId);
   const chunks = await getOrderedChunks(id);
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
+  await withTransaction(async (client) => {
     for (const chunk of chunks)
       await enqueue(client, 'verification-events', chunk.hash.trim(), {
         eventType: 'VERIFY_CHUNK',
         chunkId: chunk.id,
         chunkHash: chunk.hash.trim(),
       });
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
   return { queued: chunks.length };
 }

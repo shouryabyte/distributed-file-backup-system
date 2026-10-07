@@ -15,7 +15,7 @@ export async function verifyChunk(chunkId: string, hash: string): Promise<void> 
     try {
       good = sha256(await getChunk(replica as Node, hash)) === hash;
     } catch {
-      /* Mark unreadable replica failed. */
+      good = false;
     }
     if (!good) {
       damaged = true;

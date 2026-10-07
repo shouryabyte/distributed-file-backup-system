@@ -29,24 +29,18 @@ export async function cached<T>(key: string, load: () => Promise<T>): Promise<T>
       cacheHits.inc();
       return JSON.parse(value) as T;
     }
-  } catch {
-    /* PostgreSQL remains authoritative. */
-  }
+  } catch {}
   cacheMisses.inc();
   const value = await load();
   try {
     await ready();
     await redis.set(key, JSON.stringify(value), 'EX', env.CACHE_TTL_SECONDS);
-  } catch {
-    /* Cache outage must not fail the request. */
-  }
+  } catch {}
   return value;
 }
 export async function invalidate(key: string) {
   try {
     await ready();
     await redis.del(key);
-  } catch {
-    /* Best effort. */
-  }
+  } catch {}
 }

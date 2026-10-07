@@ -165,10 +165,16 @@ Errors use `{ "error": { "code": "...", "message": "..." } }`. Request IDs appea
 
 Requirements: Docker Desktop or Docker Engine with Compose. On Windows PowerShell:
 
+On first setup, create `.env` and replace `POSTGRES_PASSWORD`, `GRAFANA_PASSWORD`, `JWT_SECRET`, and `INTERNAL_TOKEN` with separate random values. Run the random-value command below once per secret. Set the password in `DATABASE_URL` to the same value as `POSTGRES_PASSWORD` for commands run directly on the host. Keep your existing `.env` on later runs: replacing it can make its password disagree with the existing PostgreSQL volume.
+
 ```powershell
-Copy-Item .env.example .env
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
-# Edit .env: replace POSTGRES_PASSWORD, GRAFANA_PASSWORD, JWT_SECRET, and INTERNAL_TOKEN with separate random values.
+```
+
+After editing `.env`, start the stack:
+
+```powershell
 docker compose up --build -d
 docker compose ps
 docker compose logs -f api replication-worker
@@ -260,8 +266,3 @@ Observe k6 throughput, latency, and error rate alongside Prometheus resource met
 - A sudden process crash between storage write and metadata commit can leave an orphan physical chunk. A periodic orphan scanner would close this gap.
 
 Future work: consistent hashing, S3 backend, Kubernetes, multi-region replication, encryption, erasure coding, versioning, garbage-collection optimization, load balancing, rebalancing, tracing, and autoscaling.
-<<<<<<< HEAD
-=======
-
-
->>>>>>> 3911792a20d90befce2d10c7111b90bd8f90ad69

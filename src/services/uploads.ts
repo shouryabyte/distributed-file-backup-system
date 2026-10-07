@@ -1,4 +1,5 @@
-import { pool } from '../config/db.js';
+import type pg from 'pg';
+import { withTransaction } from '../config/db.js';
 import { env } from '../config/env.js';
 import { sha256 } from '../chunking/chunks.js';
 import { AppError } from '../errors/AppError.js';
@@ -17,20 +18,74 @@ export async function initiate(userId: string, name: string, size: number): Prom
   return createUpload(userId, name, size, total);
 }
 
+async function lockedSession(client: pg.PoolClient, uploadId: string, userId: string) {
+  const session = (
+    await client.query<UploadRow>(
+      'SELECT * FROM upload_sessions WHERE id=$1 AND user_id=$2 FOR UPDATE',
+      [uploadId, userId],
+    )
+  ).rows[0];
+  if (!session) throw new AppError(404, 'UPLOAD_NOT_FOUND', 'Upload not found');
+  return session;
+}
+
+async function storeReplica(
+  client: pg.PoolClient,
+  chunkId: string,
+  hash: string,
+  data: Buffer,
+  nodes: Node[],
+) {
+  const node = await primaryFor(hash, nodes);
+  await putChunk(node, hash, data);
+  await client.query(
+    "INSERT INTO chunk_replicas(chunk_id,node_id,status) VALUES($1,$2,'ACTIVE') ON CONFLICT(chunk_id,node_id) DO UPDATE SET status='ACTIVE',updated_at=now()",
+    [chunkId, node.id],
+  );
+  await enqueue(client, 'replication-events', hash, {
+    eventType: 'REPLICATE_CHUNK',
+    chunkId,
+    chunkHash: hash,
+  });
+}
+
+async function findOrCreateChunk(client: pg.PoolClient, hash: string, data: Buffer) {
+  await lockHash(client, hash);
+  const nodes = (
+    await client.query<Node>('SELECT id,url,enabled,healthy FROM storage_nodes ORDER BY id')
+  ).rows;
+  const existing = (
+    await client.query<{ id: string }>('SELECT id FROM chunks WHERE hash=$1', [hash])
+  ).rows[0];
+
+  if (!existing) {
+    const chunk = (
+      await client.query<{ id: string }>(
+        'INSERT INTO chunks(hash,size) VALUES($1,$2) RETURNING id',
+        [hash, data.length],
+      )
+    ).rows[0];
+    await storeReplica(client, chunk.id, hash, data, nodes);
+    return false;
+  }
+
+  const hasHealthyReplica = (
+    await client.query(
+      `SELECT 1 FROM chunk_replicas r JOIN storage_nodes n ON n.id=r.node_id
+       WHERE r.chunk_id=$1 AND r.status='ACTIVE' AND n.enabled AND n.healthy LIMIT 1`,
+      [existing.id],
+    )
+  ).rowCount;
+  if (!hasHealthyReplica) await storeReplica(client, existing.id, hash, data, nodes);
+  return true;
+}
+
 export async function stageChunk(userId: string, uploadId: string, sequence: number, data: Buffer) {
   if (!data.length || data.length > env.CHUNK_SIZE_BYTES)
     throw new AppError(400, 'INVALID_CHUNK_SIZE', 'Invalid chunk size');
   const hash = sha256(data);
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const session = (
-      await client.query<UploadRow>(
-        'SELECT * FROM upload_sessions WHERE id=$1 AND user_id=$2 FOR UPDATE',
-        [uploadId, userId],
-      )
-    ).rows[0];
-    if (!session) throw new AppError(404, 'UPLOAD_NOT_FOUND', 'Upload not found');
+  const deduplicated = await withTransaction(async (client) => {
+    const session = await lockedSession(client, uploadId, userId);
     if (session.status !== 'OPEN') throw new AppError(409, 'UPLOAD_CLOSED', 'Upload is closed');
     if (sequence < 1 || sequence > session.total_chunks)
       throw new AppError(400, 'INVALID_SEQUENCE', 'Invalid chunk sequence');
@@ -53,71 +108,18 @@ export async function stageChunk(userId: string, uploadId: string, sequence: num
           'CHUNK_CONFLICT',
           'A different chunk was already uploaded at this sequence',
         );
-      await client.query('COMMIT');
-      recordChunk(true);
-      return { hash, deduplicated: true };
+      return true;
     }
-    await lockHash(client, hash);
-    const nodes = (
-      await client.query<Node>('SELECT id,url,enabled,healthy FROM storage_nodes ORDER BY id')
-    ).rows;
-    let chunk = (await client.query<{ id: string }>('SELECT id FROM chunks WHERE hash=$1', [hash]))
-      .rows[0];
-    const deduplicated = Boolean(chunk);
-    if (!chunk) {
-      const node = await primaryFor(hash, nodes);
-      await putChunk(node, hash, data);
-      chunk = (
-        await client.query<{ id: string }>(
-          'INSERT INTO chunks(hash,size) VALUES($1,$2) ON CONFLICT(hash) DO UPDATE SET hash=EXCLUDED.hash RETURNING id',
-          [hash, data.length],
-        )
-      ).rows[0];
-      await client.query(
-        "INSERT INTO chunk_replicas(chunk_id,node_id,status) VALUES($1,$2,'ACTIVE') ON CONFLICT(chunk_id,node_id) DO UPDATE SET status='ACTIVE',updated_at=now()",
-        [chunk.id, node.id],
-      );
-      await enqueue(client, 'replication-events', hash, {
-        eventType: 'REPLICATE_CHUNK',
-        chunkId: chunk.id,
-        chunkHash: hash,
-      });
-    } else {
-      const available = (
-        await client.query(
-          `SELECT 1 FROM chunk_replicas r JOIN storage_nodes n ON n.id=r.node_id
-        WHERE r.chunk_id=$1 AND r.status='ACTIVE' AND n.enabled AND n.healthy LIMIT 1`,
-          [chunk.id],
-        )
-      ).rowCount;
-      if (!available) {
-        const node = await primaryFor(hash, nodes);
-        await putChunk(node, hash, data);
-        await client.query(
-          "INSERT INTO chunk_replicas(chunk_id,node_id,status) VALUES($1,$2,'ACTIVE') ON CONFLICT(chunk_id,node_id) DO UPDATE SET status='ACTIVE',updated_at=now()",
-          [chunk.id, node.id],
-        );
-        await enqueue(client, 'replication-events', hash, {
-          eventType: 'REPLICATE_CHUNK',
-          chunkId: chunk.id,
-          chunkHash: hash,
-        });
-      }
-    }
+    const reused = await findOrCreateChunk(client, hash, data);
     await client.query(
       "INSERT INTO upload_chunks(upload_id,sequence_number,chunk_hash,size,status) VALUES($1,$2,$3,$4,'UPLOADED')",
       [uploadId, sequence, hash, data.length],
     );
     await client.query('UPDATE upload_sessions SET updated_at=now() WHERE id=$1', [uploadId]);
-    await client.query('COMMIT');
-    recordChunk(deduplicated);
-    return { hash, deduplicated };
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+    return reused;
+  });
+  recordChunk(deduplicated);
+  return { hash, deduplicated };
 }
 
 export async function status(userId: string, uploadId: string) {
@@ -142,18 +144,9 @@ export async function status(userId: string, uploadId: string) {
 }
 
 export async function complete(userId: string, uploadId: string) {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const session = (
-      await client.query<UploadRow>(
-        'SELECT * FROM upload_sessions WHERE id=$1 AND user_id=$2 FOR UPDATE',
-        [uploadId, userId],
-      )
-    ).rows[0];
-    if (!session) throw new AppError(404, 'UPLOAD_NOT_FOUND', 'Upload not found');
+  return withTransaction(async (client) => {
+    const session = await lockedSession(client, uploadId, userId);
     if (session.status === 'COMPLETED') {
-      await client.query('COMMIT');
       return { fileId: session.file_id };
     }
     if (session.status !== 'OPEN') throw new AppError(409, 'UPLOAD_CLOSED', 'Upload is closed');
@@ -187,12 +180,6 @@ export async function complete(userId: string, uploadId: string) {
       "UPDATE upload_sessions SET status='COMPLETED',file_id=$2,updated_at=now() WHERE id=$1",
       [uploadId, file.id],
     );
-    await client.query('COMMIT');
     return { fileId: file.id };
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }

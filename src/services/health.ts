@@ -1,4 +1,4 @@
-import { pool } from '../config/db.js';
+import { pool, withTransaction } from '../config/db.js';
 import { env } from '../config/env.js';
 import { enqueue } from '../repositories/files.js';
 import { listNodes, setHealth } from '../repositories/nodes.js';
@@ -43,9 +43,7 @@ export async function scheduleUnderReplicated() {
     )
   ).rows;
   if (!rows.length) return;
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
+  await withTransaction(async (client) => {
     for (const row of rows) {
       const pending = (
         await client.query(
@@ -60,19 +58,11 @@ export async function scheduleUnderReplicated() {
           chunkHash: row.hash.trim(),
         });
     }
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 async function expireUploads() {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
+  await withTransaction(async (client) => {
     const expired = (
       await client.query<{ id: string }>(
         "UPDATE upload_sessions SET status='FAILED',updated_at=now() WHERE status='OPEN' AND updated_at < now()-interval '24 hours' RETURNING id",
@@ -83,13 +73,7 @@ async function expireUploads() {
         expired.map((row) => row.id),
       ]);
     }
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 async function scheduleUnreferenced() {
@@ -101,22 +85,14 @@ async function scheduleUnreferenced() {
     AND NOT EXISTS(SELECT 1 FROM upload_chunks uc WHERE uc.chunk_hash=c.hash)
     AND NOT EXISTS(SELECT 1 FROM outbox o WHERE o.topic='cleanup-events' AND o.event_key=c.hash AND o.created_at>now()-interval '1 minute')`)
   ).rows;
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
+  await withTransaction(async (client) => {
     for (const row of rows)
       await enqueue(client, 'cleanup-events', row.hash.trim(), {
         eventType: 'CLEANUP_CHUNK',
         chunkId: row.id,
         chunkHash: row.hash.trim(),
       });
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 export function startHealthLoop() {

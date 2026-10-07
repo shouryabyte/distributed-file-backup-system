@@ -7,6 +7,16 @@ import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
 
 const hashPattern = /^[a-f0-9]{64}$/;
+
+async function storedChunkMatches(filePath: string, hash: string): Promise<boolean> {
+  try {
+    const data = await readFile(filePath);
+    return createHash('sha256').update(data).digest('hex') === hash;
+  } catch {
+    return false;
+  }
+}
+
 export function createStorageNode(dataDir: string, internalToken: string, maxChunkSize: number) {
   const app = express();
   app.get('/internal/health', (_req, res) => {
@@ -40,16 +50,7 @@ export function createStorageNode(dataDir: string, internalToken: string, maxChu
         await rm(temporary, { force: true });
         return res.status(422).json({ error: 'Hash mismatch' });
       }
-      let same = false;
-      try {
-        same =
-          createHash('sha256')
-            .update(await readFile(target))
-            .digest('hex') === hash;
-      } catch {
-        /* Missing target will be created. */
-      }
-      if (same) await rm(temporary, { force: true });
+      if (await storedChunkMatches(target, hash)) await rm(temporary, { force: true });
       else await rename(temporary, target);
       res.status(201).json({ hash, size: count });
     } catch (error) {
