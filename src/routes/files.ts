@@ -27,6 +27,9 @@ fileRouter.get('/', async (req, res) => {
 fileRouter.get('/:id', async (req, res) => {
   res.json(await files.fileDetails(z.uuid().parse(req.params.id), req.userId!));
 });
+fileRouter.get('/:id/chunks', async (req, res) => {
+  res.json(await files.fileChunks(z.uuid().parse(req.params.id), req.userId!));
+});
 fileRouter.get('/:id/download', async (req, res) => {
   const { file, stream } = await files.download(z.uuid().parse(req.params.id), req.userId!);
   res.setHeader('Content-Type', 'application/octet-stream');

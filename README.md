@@ -142,6 +142,7 @@ All public file and upload routes require `Authorization: Bearer <JWT>`. Interna
 | POST   | `/api/files/upload`                   | Stream whole file; `x-file-name` and octet-stream body |
 | GET    | `/api/files`                          | List owned files                                       |
 | GET    | `/api/files/:id`                      | Owned file metadata                                    |
+| GET    | `/api/files/:id/chunks`               | Ordered chunks and replica states for owned file       |
 | GET    | `/api/files/:id/download`             | Stream original bytes                                  |
 | DELETE | `/api/files/:id`                      | Delete file and queue cleanup                          |
 | POST   | `/api/files/:id/verify`               | Queue integrity checks                                 |
@@ -182,7 +183,13 @@ docker compose logs -f api replication-worker
 
 The stack runs PostgreSQL, Redis, a single-node KRaft Kafka broker, a migration job, the API, four storage nodes, three workers, Prometheus, and Grafana. The Kafka container configuration follows the [official Apache Kafka Docker examples](https://github.com/apache/kafka/tree/trunk/docker/examples). Compose volumes retain metadata and chunk bytes. `docker compose down` stops containers; `docker compose down -v` also removes all stored data.
 
-The API is at `http://localhost:3000`, Prometheus at `http://localhost:9090`, and Grafana at `http://localhost:3001`. Sign in to Grafana with `GRAFANA_USER` and `GRAFANA_PASSWORD` from `.env`. The provisioned **Distributed Backup System** dashboard shows API rate and latency, deduplication ratio, worker activity, replication failures, and node health.
+The frontend is at `http://localhost:3002`, the API at `http://localhost:3000`, Prometheus at `http://localhost:9090`, and Grafana at `http://localhost:3001`. Sign in to Grafana with `GRAFANA_USER` and `GRAFANA_PASSWORD` from `.env`. The provisioned **Distributed Backup System** dashboard shows API rate and latency, deduplication ratio, worker activity, replication failures, and node health.
+
+### Frontend
+
+The Next.js frontend has register/login, dashboard, file list and detail, direct and resumable upload, storage-node controls, and monitoring links. Register a user, upload the same file twice, open its chunk map to inspect references and replicas, disable an active node from **Storage nodes**, then watch the backend place a replacement replica. Re-enable the node when done. Verification and cleanup run in the background.
+
+The browser talks to same-origin Next.js routes. Next keeps the user JWT in an HTTP-only cookie and forwards authenticated requests to the existing Express API. Privileged node and chunk inspection routes run only on the Next server, where `INTERNAL_TOKEN` is available; the token is never sent to browser JavaScript. The new `GET /api/files/:id/chunks` endpoint exposes ordered chunks and replica states only after checking file ownership. No API CORS change is needed. Docker Compose supplies the frontend's internal API URL and token. For standalone frontend development, copy `frontend/.env.example` to `frontend/.env.local`, set its token to the value in your local root `.env`, and run `npm.cmd run dev -- --port 3002` from `frontend/`.
 
 ## Demo commands
 

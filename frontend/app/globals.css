@@ -1,0 +1,114 @@
+@import 'tailwindcss';
+
+:root {
+  color-scheme: light;
+  --ink: #132533;
+  --muted: #647581;
+  --line: #dfe7e8;
+  --canvas: #f4f7f7;
+  --teal: #087c80;
+}
+
+* {
+  box-sizing: border-box;
+}
+html {
+  scroll-behavior: smooth;
+}
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family:
+    Inter,
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+}
+button,
+input {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+::selection {
+  background: #b9e8e2;
+  color: #10383b;
+}
+.surface {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 18px;
+  box-shadow: 0 8px 30px rgba(28, 59, 68, 0.035);
+}
+.input {
+  width: 100%;
+  border: 1px solid #d8e2e4;
+  background: #fff;
+  border-radius: 11px;
+  padding: 0.74rem 0.9rem;
+  outline: none;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+.input:focus {
+  border-color: #0b8587;
+  box-shadow: 0 0 0 3px rgba(8, 124, 128, 0.13);
+}
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 10px;
+  background: #087c80;
+  color: #fff;
+  font-weight: 650;
+  padding: 0.7rem 1rem;
+  transition:
+    background 0.15s,
+    transform 0.15s;
+}
+.btn-primary:hover:not(:disabled) {
+  background: #066569;
+  transform: translateY(-1px);
+}
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 1px solid #d9e3e5;
+  border-radius: 10px;
+  background: #fff;
+  color: #263e4d;
+  font-weight: 600;
+  padding: 0.68rem 0.94rem;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+.btn-secondary:hover:not(:disabled) {
+  border-color: #91bec0;
+  background: #f3faf9;
+}
+.skeleton {
+  background: linear-gradient(90deg, #ebf0f1 25%, #f6f9f9 50%, #ebf0f1 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.35s ease-in-out infinite;
+  border-radius: 9px;
+}
+@keyframes shimmer {
+  to {
+    background-position-x: -200%;
+  }
+}

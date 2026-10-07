@@ -21,6 +21,24 @@ export async function fileDetails(id: string, userId: string) {
   return file;
 }
 
+export async function fileChunks(id: string, userId: string) {
+  await fileDetails(id, userId);
+  const chunks = await getOrderedChunks(id);
+  return Promise.all(
+    chunks.map(async (chunk) => ({
+      sequenceNumber: chunk.sequence_number,
+      hash: chunk.hash.trim(),
+      size: chunk.size,
+      replicas: (await getReplicas(chunk.id)).map((replica) => ({
+        nodeId: replica.node_id,
+        status: replica.status,
+        enabled: replica.enabled,
+        healthy: replica.healthy,
+      })),
+    })),
+  );
+}
+
 export async function download(
   id: string,
   userId: string,

@@ -135,8 +135,24 @@ run(
       .set('Authorization', `Bearer ${owner.body.token}`)
       .expect(200);
     const fileId = completed.body.fileId as string;
+    const visibleChunks = await api
+      .get(`/api/files/${fileId}/chunks`)
+      .set('Authorization', `Bearer ${owner.body.token}`)
+      .expect(200);
+    expect(visibleChunks.body).toEqual([
+      expect.objectContaining({
+        sequenceNumber: 1,
+        hash: sha256(data),
+        size: data.length,
+        replicas: expect.any(Array),
+      }),
+    ]);
     await api
       .get(`/api/files/${fileId}`)
+      .set('Authorization', `Bearer ${stranger.body.token}`)
+      .expect(404);
+    await api
+      .get(`/api/files/${fileId}/chunks`)
       .set('Authorization', `Bearer ${stranger.body.token}`)
       .expect(404);
     await api

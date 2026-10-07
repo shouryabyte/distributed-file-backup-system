@@ -163,6 +163,20 @@ services:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
     ports: ['3001:3000']
     depends_on: [prometheus]
+  frontend:
+    build: ./frontend
+    environment:
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      INTERNAL_API_URL: http://api:3000
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:?Set INTERNAL_TOKEN in .env}
+      CHUNK_SIZE_BYTES: ${CHUNK_SIZE_BYTES:-5242880}
+      MAX_FILE_SIZE_BYTES: ${MAX_FILE_SIZE_BYTES:-1073741824}
+      REPLICATION_FACTOR: ${REPLICATION_FACTOR:-3}
+    ports: ['3002:3000']
+    depends_on:
+      api: { condition: service_healthy }
+    restart: unless-stopped
 
 volumes:
   postgres-data:
